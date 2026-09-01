@@ -501,6 +501,9 @@ class FinancialQueryBuilder:
 		"""
 		Return opening balances for *all accounts* defaulting to zero.
 		"""
+		if not self._has_opening_balances():
+			return self._zero_opening_balances(accounts)
+
 		if frappe.get_single_value("Accounts Settings", "ignore_account_closing_balance"):
 			return self._get_opening_balances_from_gl(accounts)
 
@@ -525,6 +528,30 @@ class FinancialQueryBuilder:
 				return self._rebase_closing_balances(closing_data, closing_voucher.period_end_date)
 
 		return self._get_opening_balances_from_gl(accounts)
+
+	def _zero_opening_balances(self, accounts: list[str]) -> dict:
+		first_period_key = self.periods[0]["key"]
+		balances_data = {}
+
+		for account in accounts:
+			account_data = AccountData(account=account, **self._get_account_meta(account))
+			account_data.add_period(PeriodValue(first_period_key, 0.0, 0, 0))
+			balances_data[account] = account_data
+
+		return balances_data
+
+	def _has_opening_balances(self) -> bool:
+		"""Income and expense accounts do not carry a balance into the next year.
+
+		Their opening would be the previous year's movement, which accumulating adds
+		into the period, overstating the statement. erpnext reads the profit and loss
+		statement from the start of the fiscal year for the same reason.
+		"""
+		report_type = frappe.db.get_value(
+			"Financial Report Template", self.filters.get("report_template"), "report_type"
+		)
+
+		return report_type != "Profit and Loss Statement"
 
 	def _get_closing_balances(self, account_names: list[str], closing_voucher: str) -> dict[str, float]:
 		closing_balances = {account: 0.0 for account in account_names}

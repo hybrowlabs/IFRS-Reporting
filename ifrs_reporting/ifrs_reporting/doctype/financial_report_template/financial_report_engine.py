@@ -603,6 +603,23 @@ class FinancialQueryBuilder:
 
 		return {row["account"]: row["movement"] or 0.0 for row in results}
 
+	def _include_opening_entries(self) -> bool:
+		"""Balance sheet figures are cumulative, so opening entries belong in them.
+
+		Opening entries are usually posted on the first day of the opening fiscal year,
+		which falls inside the first period rather than before it, so excluding them
+		here drops them from the statement altogether. erpnext only leaves them out of
+		the profit and loss statement, where they are not period movement.
+		"""
+		if frappe.get_single_value("Accounts Settings", "ignore_is_opening_check_for_reporting"):
+			return True
+
+		report_type = frappe.db.get_value(
+			"Financial Report Template", self.filters.get("report_template"), "report_type"
+		)
+
+		return report_type == "Balance Sheet"
+
 	def _get_gl_movements(self, account_names: list[str]) -> list[dict]:
 		gl_table = frappe.qb.DocType("GL Entry")
 
@@ -616,7 +633,7 @@ class FinancialQueryBuilder:
 			.groupby(gl_table.account)
 		)
 
-		if not frappe.get_single_value("Accounts Settings", "ignore_is_opening_check_for_reporting"):
+		if not self._include_opening_entries():
 			query = query.where(gl_table.is_opening == "No")
 
 		# Add period-specific columns
